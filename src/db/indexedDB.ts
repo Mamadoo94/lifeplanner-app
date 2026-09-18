@@ -32,20 +32,79 @@ const DB_VERSION = 5;
 export class LifePlannerDatabase {
   private db: IDBDatabase | null = null;
   private isSeeding = false;
+  private initPromise: Promise<IDBDatabase> | null = null;
 
   async init(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
+    if (this.db && !this._isConnectionClosed(this.db)) return this.db;
+    if (this.initPromise) return this.initPromise;
 
+    this.initPromise = this._initInternal().finally(() => {
+      this.initPromise = null;
+    });
+    return this.initPromise;
+  }
+
+  private _isConnectionClosed(db: IDBDatabase): boolean {
+    // In some browsers, closed connections don't expose a property,
+    // so we do a lightweight check via the transaction readiness.
+    try {
+      // If the connection is closed, attempting a transaction throws.
+      // We verify via a read-only probe on a known store.
+      db.transaction('app_settings', 'readonly').abort();
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  private async _initInternal(): Promise<IDBDatabase> {
+    const MAX_RETRIES = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const db = await this._openWithTimeout();
+        this.db = db;
+        return db;
+      } catch (err) {
+        lastError = err as Error;
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError || new Error('خطا در بازگشایی پایگاه داده IndexedDB');
+  }
+
+  private _openWithTimeout(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error('IndexedDB open timeout'));
+      }, 10000);
+
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => {
+        clearTimeout(timeoutId);
         reject(new Error('خطا در بازگشایی پایگاه داده IndexedDB'));
       };
 
       request.onsuccess = () => {
-        this.db = request.result;
-        resolve(this.db);
+        clearTimeout(timeoutId);
+        const db = request.result;
+
+        // If connection is closed by the OS (Android memory pressure),
+        // reset the cached reference so the next init reopens it.
+        db.onclose = () => {
+          if (this.db === db) this.db = null;
+        };
+
+        db.onversionchange = () => {
+          db.close();
+          if (this.db === db) this.db = null;
+        };
+
+        resolve(db);
       };
 
       request.onupgradeneeded = (event) => {
@@ -742,72 +801,93 @@ export class LifePlannerDatabase {
   }
 
   // Generic CRUD
+  private async _withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      // Connection likely dropped by Android OS — force reconnect and retry once
+      this.db = null;
+      await this.init();
+      return await fn();
+    }
+  }
+
   async getAll<T>(storeName: string): Promise<T[]> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result as T[]);
-      req.onerror = () => reject(req.error);
+    return this._withRetry(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result as T[]);
+        req.onerror = () => reject(req.error);
+      });
     });
   }
 
   async getById<T>(storeName: string, id: number): Promise<T | undefined> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
-      const req = store.get(id);
-      req.onsuccess = () => resolve(req.result as T);
-      req.onerror = () => reject(req.error);
+    return this._withRetry(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result as T);
+        req.onerror = () => reject(req.error);
+      });
     });
   }
 
   async add<T>(storeName: string, item: T): Promise<number> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.add(item);
-      let insertedId = 0;
-      req.onsuccess = () => {
-        insertedId = req.result as number;
-      };
-      req.onerror = () => reject(req.error);
-      tx.oncomplete = () => resolve(insertedId);
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    return this._withRetry(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.add(item);
+        let insertedId = 0;
+        req.onsuccess = () => {
+          insertedId = req.result as number;
+        };
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => resolve(insertedId);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      });
     });
   }
 
   async put<T>(storeName: string, item: T): Promise<number> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.put(item);
-      let updatedId = 0;
-      req.onsuccess = () => {
-        updatedId = req.result as number;
-      };
-      req.onerror = () => reject(req.error);
-      tx.oncomplete = () => resolve(updatedId);
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    return this._withRetry(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.put(item);
+        let updatedId = 0;
+        req.onsuccess = () => {
+          updatedId = req.result as number;
+        };
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => resolve(updatedId);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      });
     });
   }
 
   async delete(storeName: string, id: number): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.delete(id);
-      req.onerror = () => reject(req.error);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    return this._withRetry(async () => {
+      const db = await this.init();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.delete(id);
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+      });
     });
   }
 
