@@ -29,6 +29,7 @@ import { dbInstance } from '../db/indexedDB';
 import { toPersianDigits, getTodayJalali } from '../utils/jalali';
 import { learnPatternFromSms, parseSingleBankSMS } from '../utils/bankSmsParser';
 import { soundFx } from '../utils/audio';
+import { isNativePlatform, requestNativeSmsPermissions } from '../utils/nativeSms';
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   currency: 'toman',
@@ -90,6 +91,55 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | 'unsupported'>('default');
   const [smsPermGranted, setSmsPermGranted] = useState(true);
   const [testAlertSent, setTestAlertSent] = useState(false);
+
+  // Android runtime permission statuses: 'granted' | 'denied' | 'prompt' | 'unknown'
+  type AndroidPermStatus = 'granted' | 'denied' | 'prompt' | 'unknown';
+  const [androidPerms, setAndroidPerms] = useState<Record<string, AndroidPermStatus>>({
+    'android.permission.READ_SMS': 'unknown',
+    'android.permission.RECEIVE_SMS': 'unknown',
+    'android.permission.POST_NOTIFICATIONS': 'unknown',
+    'android.permission.RECEIVE_BOOT_COMPLETED': 'unknown',
+    'android.permission.FOREGROUND_SERVICE': 'unknown',
+  });
+  const nativeMode = isNativePlatform();
+
+  const checkAndroidPermissions = async () => {
+    if (!nativeMode) {
+      // On web/PWA, all manifest-level permissions are simulated as granted
+      setAndroidPerms({
+        'android.permission.READ_SMS': 'granted',
+        'android.permission.RECEIVE_SMS': 'granted',
+        'android.permission.POST_NOTIFICATIONS': notifPerm === 'granted' ? 'granted' : 'prompt',
+        'android.permission.RECEIVE_BOOT_COMPLETED': 'granted',
+        'android.permission.FOREROUND_SERVICE': 'granted',
+      });
+      return;
+    }
+
+    try {
+      const Permissions = (window as any).Capacitor?.Plugins?.Permissions;
+      if (!Permissions) return;
+
+      const permNames = Object.keys(androidPerms);
+      const results: Record<string, AndroidPermStatus> = {};
+      for (const name of permNames) {
+        try {
+          const res = await Permissions.checkPermission({ name });
+          results[name] = res?.granted ? 'granted' : res?.granted === false ? 'denied' : 'prompt';
+        } catch {
+          results[name] = 'unknown';
+        }
+      }
+      setAndroidPerms(results);
+    } catch {
+      // keep unknown
+    }
+  };
+
+  useEffect(() => {
+    checkAndroidPermissions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifPerm]);
 
   // SMS Pattern State
   const [isPatternModalOpen, setIsPatternModalOpen] = useState(false);
@@ -364,6 +414,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ========================================================= */}
       {activeTab === 'permissions' && (
         <div className="space-y-4">
+          {/* Android Permission Status Grid */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-400" />
+                <span>وضعیت مجوزهای اندروید</span>
+              </h2>
+              <button
+                type="button"
+                onClick={checkAndroidPermissions}
+                className="text-xs font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>بررسی مجدد</span>
+              </button>
+            </div>
+
+            {!nativeMode && (
+              <p className="text-[11px] text-amber-400/80 bg-amber-950/40 border border-amber-800/40 rounded-xl p-2.5 leading-relaxed">
+                شما در حال اجرای نسخه وب هستید. وضعیت نمایش‌داده‌شده شبیه‌سازی شده است؛ روی دستگاه اندروید وضعیت واقعی هر مجوز بررسی می‌شود.
+              </p>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {([
+                { name: 'android.permission.READ_SMS', label: 'خواندن پیامک', desc: 'READ_SMS' },
+                { name: 'android.permission.RECEIVE_SMS', label: 'دریافت پیامک', desc: 'RECEIVE_SMS' },
+                { name: 'android.permission.POST_NOTIFICATIONS', label: 'اعلان‌ها', desc: 'POST_NOTIFICATIONS' },
+                { name: 'android.permission.RECEIVE_BOOT_COMPLETED', label: 'راه‌اندازی پس از بوت', desc: 'RECEIVE_BOOT_COMPLETED' },
+                { name: 'android.permission.FOREGROUND_SERVICE', label: 'سرویس پس‌زمینه', desc: 'FOREGROUND_SERVICE' },
+              ] as const).map((perm) => {
+                const status = androidPerms[perm.name] || 'unknown';
+                const statusConfig = {
+                  granted: { label: 'داده‌شده', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', icon: <CheckCircle2 className="w-3 h-3" /> },
+                  denied: { label: 'رد شده', color: 'bg-rose-500/20 text-rose-400 border-rose-500/30', icon: <X className="w-3 h-3" /> },
+                  prompt: { label: 'در انتظار', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', icon: <AlertTriangle className="w-3 h-3" /> },
+                  unknown: { label: 'نامشخص', color: 'bg-slate-700/40 text-slate-400 border-slate-600/40', icon: <AlertCircle className="w-3 h-3" /> },
+                }[status];
+
+                return (
+                  <div key={perm.name} className="p-3 rounded-2xl bg-slate-850/80 border border-slate-800 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="p-2 rounded-lg bg-slate-800 text-slate-300 shrink-0">
+                        <Shield className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-bold text-white truncate">{perm.label}</h4>
+                        <span className="text-[10px] text-slate-500 font-mono block truncate">{perm.desc}</span>
+                      </div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 shrink-0 ${statusConfig.color}`}>
+                      {statusConfig.icon}
+                      <span>{statusConfig.label}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Request SMS permissions button (native only) */}
+            {nativeMode && (androidPerms['android.permission.RECEIVE_SMS'] === 'denied' || androidPerms['android.permission.RECEIVE_SMS'] === 'prompt') && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const granted = await requestNativeSmsPermissions();
+                  if (granted) {
+                    setAndroidPerms((prev) => ({
+                      ...prev,
+                      'android.permission.RECEIVE_SMS': 'granted',
+                      'android.permission.READ_SMS': 'granted',
+                    }));
+                    soundFx.playCheckmark();
+                  }
+                }}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold flex items-center gap-2"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>درخواست مجوز پیامک</span>
+              </button>
+            )}
+          </div>
+
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
