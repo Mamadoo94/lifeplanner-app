@@ -1,0 +1,6 @@
+{
+  "name": "LifePlanner",
+  "description": "برنامه مدیریت بهره‌وری، برنامه‌ریزی روزانه و ژورنال ترید آفلاین با پشتیبانی از تاریخ شمسی، ماشین‌حساب مدیریت ریسک، استراتژی و ژورنال معاملات، تسک‌ها، عادات و پومودورو",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

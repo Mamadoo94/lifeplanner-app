@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Subtle glow inner ring -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#38bdf8" stroke-opacity="0.15" stroke-width="4"/>
+
+  <!-- Planner Notebook / Widget base icon -->
+  <g filter="url(#shadow)">
+    <!-- Main Board -->
+    <rect x="96" y="96" width="320" height="320" rx="44" fill="#0f172a" stroke="#334155" stroke-width="8"/>
+    
+    <!-- Top Bar with status lights -->
+    <rect x="96" y="96" width="320" height="72" rx="44" fill="#1e293b"/>
+    <rect x="96" y="140" width="320" height="28" fill="#1e293b"/>
+    
+    <circle cx="144" cy="132" r="10" fill="#ef4444"/>
+    <circle cx="174" cy="132" r="10" fill="#f59e0b"/>
+    <circle cx="204" cy="132" r="10" fill="#10b981"/>
+
+    <!-- Trading Candlestick / Growth Chart Graphic -->
+    <line x1="160" y1="210" x2="160" y2="340" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+    <rect x="148" y="240" width="24" height="64" rx="6" fill="#0ea5e9"/>
+
+    <line x1="220" y1="190" x2="220" y2="350" stroke="#10b981" stroke-width="4" stroke-linecap="round"/>
+    <rect x="208" y="220" width="24" height="90" rx="6" fill="#10b981"/>
+
+    <!-- Checkmark Badge & Habit Flame Star -->
+    <circle cx="316" cy="270" r="54" fill="url(#accentGrad)"/>
+    <path d="M294 270 L308 284 L340 252" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Gold Habit Star / Flame Accent -->
+    <polygon points="370,190 376,206 394,206 380,216 385,232 370,222 355,232 360,216 346,206 364,206" fill="url(#goldGrad)"/>
+  </g>
+</svg>
